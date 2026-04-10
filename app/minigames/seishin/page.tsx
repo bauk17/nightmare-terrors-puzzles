@@ -138,8 +138,8 @@ export default function SeishinMinigame() {
       const player = playerRef.current;
       if (hitIntensity > 0) setHitIntensity(prev => Math.max(0, prev - 0.05));
 
-      player.visualX += (player.gridX * TILE_SIZE - player.visualX) * 0.15;
-      player.visualY += (player.gridY * TILE_SIZE - player.visualY) * 0.15;
+      player.visualX += (player.gridX * TILE_SIZE - player.visualX) * 0.25;
+      player.visualY += (player.gridY * TILE_SIZE - player.visualY) * 0.25;
 
       if (gamePhase === 'PLAYING' || gamePhase === 'PREP') {
         const distMoving = Math.abs(player.gridX * TILE_SIZE - player.visualX) + Math.abs(player.gridY * TILE_SIZE - player.visualY);

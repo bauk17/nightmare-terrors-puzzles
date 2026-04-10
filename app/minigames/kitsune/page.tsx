@@ -154,8 +154,8 @@ export default function KitsuneRitual() {
         if (statusText !== "") setStatusText("");
       }
 
-      player.visualX += (player.gridX * TILE_SIZE - player.visualX) * 0.15;
-      player.visualY += (player.gridY * TILE_SIZE - player.visualY) * 0.15;
+      player.visualX += (player.gridX * TILE_SIZE - player.visualX) * 0.25;
+      player.visualY += (player.gridY * TILE_SIZE - player.visualY) * 0.25;
 
       const dist = Math.abs(player.gridX * TILE_SIZE - player.visualX) + Math.abs(player.gridY * TILE_SIZE - player.visualY);
       player.isMoving = dist > 0.5;
@@ -382,12 +382,19 @@ export default function KitsuneRitual() {
           </div>
         </div>
       )}
-
+      
       {gameOver && (
-        <div className="absolute inset-0 z-70 flex flex-col items-center justify-center bg-black/95 backdrop-blur-xl">
-          <h1 className="text-6xl font-black text-rose-700 mb-6 italic uppercase tracking-tighter">You lost</h1>
-          <button onClick={resetGame} className="px-10 py-4 bg-rose-600 text-white font-black rounded-full uppercase text-sm border-b-4 border-rose-800 transition-all active:translate-y-1 active:border-b-0">Restart Minigame</button>
-          <button onClick={() => router.push('/')} className="px-10 py-4 bg-white/5 text-white font-black rounded-full hover:bg-white/10 transition-all uppercase text-sm border border-white/10">Abort</button>
+        <div className="absolute inset-0 z-70 flex flex-col items-center justify-center bg-black/95 backdrop-blur-2xl">
+          <h1 className="text-6xl font-black text-rose-600 mb-2 italic uppercase">You lost</h1>
+          <p className="text-white/50 mb-10 font-bold uppercase tracking-widest">Final Score: {score}</p>
+          <div className="flex gap-4">
+            <button onClick={resetGame} className="px-10 py-4 bg-emerald-500 text-black font-black rounded-full uppercase text-xs hover:scale-105 transition-transform flex items-center gap-2">
+              <MdRefresh className="text-xl" /> Retry
+            </button>
+            <button onClick={() => router.push('/')} className="px-10 py-4 bg-white/5 border border-white/10 text-white font-black rounded-full uppercase text-xs hover:bg-white/10 transition-all flex items-center gap-2">
+              <MdHome className="text-xl" /> Exit
+            </button>
+          </div>
         </div>
       )}
 
