@@ -72,7 +72,7 @@ export default function HomePage() {
           PokeTerrorPuzzles
         </div>
         <div className="hidden md:flex items-center space-x-8">
-          <NavLink label="Rituals" active />
+          <NavLink label="Terrors" active />
         </div>
         <div className="flex items-center gap-4">
            {/* Versão alternativa do botão no Topo caso prefira */}
