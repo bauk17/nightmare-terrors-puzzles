@@ -1,0 +1,342 @@
+"use client";
+
+import React, { useRef, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { MdClose, MdPlayArrow, MdRefresh, MdHome } from "react-icons/md";
+
+// --- CONSTANTES ---
+const TILE_SIZE = 32;
+const MAP_SIZE = 31;
+const MAP_RADIUS = Math.floor(MAP_SIZE / 2);
+const CANVAS_WIDTH = 640;
+const CANVAS_HEIGHT = 480;
+const STEP_DELAY = 450; 
+const SPAWN_INTERVAL_MS = STEP_DELAY * 2;
+
+type Wave = {
+  step: number;
+  lastStepTime: number;
+  hitPlayer: boolean;
+};
+
+type Player = {
+  gridX: number;
+  gridY: number;
+  visualX: number;
+  visualY: number;
+  health: number;
+  isMoving: boolean;
+};
+
+export default function KitsuneRitual() {
+  const router = useRouter();
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const machampImgRef = useRef<HTMLImageElement | null>(null);
+  
+  const [gameOver, setGameOver] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [lives, setLives] = useState(5);
+  const [score, setScore] = useState(0);
+  const [statusText, setStatusText] = useState("");
+  const [hitEffect, setHitEffect] = useState(0);
+
+  const playerRef = useRef<Player>({
+    gridX: MAP_RADIUS,
+    gridY: MAP_RADIUS + 2,
+    visualX: MAP_RADIUS * TILE_SIZE,
+    visualY: (MAP_RADIUS + 2) * TILE_SIZE,
+    health: 5,
+    isMoving: false,
+  });
+
+  const wavesRef = useRef<Wave[]>([]);
+  const gameStartTimeRef = useRef<number | null>(null);
+  const lastSpawnTimeRef = useRef<number>(0);
+  const keysRef = useRef<{ [key: string]: boolean }>({});
+  const scoreRef = useRef<number>(0);
+
+  const getOctagonalDist = (col: number, row: number) => {
+    const dx = Math.abs(col - MAP_RADIUS);
+    const dy = Math.abs(row - MAP_RADIUS);
+    const rawDist = Math.max(dx, dy, (dx + dy) * 0.707);
+    return Math.round(rawDist);
+  };
+
+  const resetGame = () => {
+    playerRef.current = {
+      gridX: MAP_RADIUS, gridY: MAP_RADIUS + 2,
+      visualX: MAP_RADIUS * TILE_SIZE, visualY: (MAP_RADIUS + 2) * TILE_SIZE,
+      health: 5, isMoving: false,
+    };
+    wavesRef.current = [];
+    gameStartTimeRef.current = null;
+    lastSpawnTimeRef.current = 0;
+    scoreRef.current = 0;
+    setScore(0);
+    setLives(5);
+    setHitEffect(0);
+    setGameOver(false);
+    setIsPaused(false);
+    setStatusText("STUNNED...");
+  };
+
+  useEffect(() => {
+    const machampImg = new Image();
+    machampImg.src = "/machamp.png"; 
+    machampImg.onload = () => { machampImgRef.current = machampImg; };
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.imageSmoothingEnabled = false;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      keysRef.current[e.key.toLowerCase()] = true;
+      if (e.key === "Escape" && !gameOver) setIsPaused(prev => !prev);
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      keysRef.current[e.key.toLowerCase()] = false;
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    let animationFrameId: number;
+
+    const gameLoop = (currentTime: number) => {
+      if (gameStartTimeRef.current === null) gameStartTimeRef.current = currentTime;
+      if (!gameOver && !isPaused) update(currentTime);
+      draw(ctx);
+      animationFrameId = requestAnimationFrame(gameLoop);
+    };
+
+    const update = (currentTime: number) => {
+      const player = playerRef.current;
+      const keys = keysRef.current;
+      const elapsed = currentTime - (gameStartTimeRef.current || currentTime);
+
+      if (hitEffect > 0) setHitEffect(prev => Math.max(0, prev - 0.05));
+
+      let canMove = false;
+      let startWaves = false;
+
+      if (elapsed < 1000) {
+        if (statusText !== "STUNNED...") setStatusText("STUNNED...");
+      } else if (elapsed < 2000) {
+        canMove = true;
+        const rem = ((2000 - elapsed) / 1000).toFixed(1);
+        if (statusText !== `WAVE IN: ${rem}s`) setStatusText(`WAVE IN: ${rem}s`);
+      } else {
+        canMove = true;
+        startWaves = true;
+        if (statusText !== "") setStatusText("");
+      }
+
+      player.visualX += (player.gridX * TILE_SIZE - player.visualX) * 0.15;
+      player.visualY += (player.gridY * TILE_SIZE - player.visualY) * 0.15;
+
+      const dist = Math.abs(player.gridX * TILE_SIZE - player.visualX) + Math.abs(player.gridY * TILE_SIZE - player.visualY);
+      player.isMoving = dist > 0.5;
+
+      if (!player.isMoving && canMove) {
+        let nX = player.gridX, nY = player.gridY;
+        if (keys['arrowup'] || keys['w']) nY--; 
+        else if (keys['arrowdown'] || keys['s']) nY++;
+        if (keys['arrowleft'] || keys['a']) nX--; 
+        else if (keys['arrowright'] || keys['d']) nX++;
+
+        const isCenter = nX === MAP_RADIUS && nY === MAP_RADIUS;
+        const isInsideMap = nX >= 0 && nX < MAP_SIZE && nY >= 0 && nY < MAP_SIZE;
+
+        if ((nX !== player.gridX || nY !== player.gridY) && isInsideMap && !isCenter) {
+          player.gridX = nX; player.gridY = nY;
+          player.isMoving = true;
+        }
+      }
+
+      if (startWaves) {
+        if (lastSpawnTimeRef.current === 0) lastSpawnTimeRef.current = currentTime;
+        if (currentTime - lastSpawnTimeRef.current >= SPAWN_INTERVAL_MS) {
+          wavesRef.current.push({ step: 0, lastStepTime: currentTime, hitPlayer: false });
+          lastSpawnTimeRef.current = currentTime;
+        }
+
+        for (let i = wavesRef.current.length - 1; i >= 0; i--) {
+          const w = wavesRef.current[i];
+          if (currentTime - w.lastStepTime >= STEP_DELAY) {
+            w.step++; 
+            w.lastStepTime = currentTime;
+            const pDist = getOctagonalDist(player.gridX, player.gridY);
+            if (pDist === w.step && !w.hitPlayer) {
+              player.health--; w.hitPlayer = true;
+              setLives(player.health);
+              setHitEffect(0.6);
+              if (player.health <= 0) setGameOver(true);
+            } else if (w.step > pDist && !w.hitPlayer) {
+              w.hitPlayer = true; 
+              scoreRef.current += 100; 
+              setScore(scoreRef.current);
+            }
+          }
+          if (w.step > MAP_RADIUS + 2) wavesRef.current.splice(i, 1);
+        }
+      }
+    };
+
+    const draw = (ctx: CanvasRenderingContext2D) => {
+      ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      ctx.save();
+      const player = playerRef.current;
+      
+      ctx.translate(CANVAS_WIDTH / 2 - (player.visualX + 16), CANVAS_HEIGHT / 2 - (player.visualY + 16));
+
+      for (let r = 0; r < MAP_SIZE; r++) {
+        for (let c = 0; c < MAP_SIZE; c++) {
+          const tx = c * TILE_SIZE; const ty = r * TILE_SIZE;
+          const tileDist = getOctagonalDist(c, r);
+          ctx.strokeStyle = "#1a0505"; ctx.strokeRect(tx, ty, TILE_SIZE, TILE_SIZE);
+
+          if (wavesRef.current.some(w => tileDist === w.step)) {
+            ctx.fillStyle = "rgba(220, 20, 60, 0.25)";
+            ctx.fillRect(tx, ty, TILE_SIZE, TILE_SIZE);
+            ctx.strokeStyle = "#ff1e4b"; ctx.lineWidth = 2;
+            const dx = c - MAP_RADIUS; const dy = r - MAP_RADIUS;
+            const centerX = tx + TILE_SIZE / 2; const centerY = ty + TILE_SIZE / 2;
+            
+            if (dx === 0 && dy === 0) {
+              ctx.beginPath(); ctx.arc(centerX, centerY, 2, 0, Math.PI * 2); ctx.stroke();
+            } else {
+              const angle = Math.atan2(dy, dx); const length = 8;
+              ctx.beginPath();
+              ctx.moveTo(centerX - Math.cos(angle) * 4, centerY - Math.sin(angle) * 4);
+              ctx.lineTo(centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length);
+              ctx.lineTo(centerX + Math.cos(angle - 0.5) * 2, centerY + Math.sin(angle - 0.5) * 2);
+              ctx.moveTo(centerX + Math.cos(angle) * length, centerY + Math.sin(angle) * length);
+              ctx.lineTo(centerX + Math.cos(angle + 0.5) * 2, centerY + Math.sin(angle + 0.5) * 2);
+              ctx.stroke();
+            }
+          }
+        }
+      }
+
+      if (machampImgRef.current) {
+        const centerX = MAP_RADIUS * TILE_SIZE;
+        const centerY = MAP_RADIUS * TILE_SIZE;
+        ctx.drawImage(machampImgRef.current, centerX - 16, centerY - 24, 64, 64);
+      }
+
+      const elapsed = (gameStartTimeRef.current) ? (performance.now() - gameStartTimeRef.current) : 0;
+      ctx.fillStyle = elapsed < 1000 ? "#555" : "#fff"; 
+      ctx.shadowBlur = 15; ctx.shadowColor = "#ff0000";
+      ctx.fillRect(player.visualX, player.visualY, TILE_SIZE, TILE_SIZE);
+      ctx.restore();
+
+      if (hitEffect > 0) {
+        const grad = ctx.createRadialGradient(
+          CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH * 0.2,
+          CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH * 0.6
+        );
+        grad.addColorStop(0, 'rgba(255, 0, 0, 0)');
+        grad.addColorStop(1, `rgba(150, 0, 0, ${hitEffect})`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      }
+
+      if (statusText && !isPaused) {
+        ctx.fillStyle = "#ff1e4b"; ctx.font = "bold 24px monospace"; ctx.textAlign = "center";
+        ctx.fillText(statusText, CANVAS_WIDTH / 2, 80);
+      }
+    };
+
+    animationFrameId = requestAnimationFrame(gameLoop);
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [gameOver, isPaused, statusText, hitEffect]);
+
+  return (
+    <div className="relative flex items-center justify-center w-full h-screen bg-[#020000] font-mono overflow-hidden">
+      
+      {/* Botão Close - No topo direito */}
+      <button onClick={() => router.push('/')} className="absolute top-8 right-8 z-50 p-3 bg-white/5 border border-white/10 rounded-full text-white active:scale-90 hover:bg-white/10 transition-colors">
+        <MdClose className="text-2xl" />
+      </button>
+
+      {/* --- OVERLAY DE PAUSA --- */}
+      {isPaused && !gameOver && (
+        <div className="absolute inset-0 z-60 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md">
+          <div className="flex flex-col items-center animate-in fade-in zoom-in duration-300">
+            <h2 className="text-5xl font-black text-white italic uppercase tracking-tighter mb-2">Game Paused</h2>
+            <div className="w-24 h-1 bg-rose-600 mb-10 shadow-[0_0_15px_#e11d48]"></div>
+            
+            <div className="flex gap-6">
+              <button 
+                onClick={() => setIsPaused(false)}
+                className="group flex flex-col items-center gap-2"
+              >
+                <div className="w-16 h-16 flex items-center justify-center bg-white text-black rounded-full group-hover:bg-rose-600 group-hover:text-white transition-all group-active:scale-90">
+                  <MdPlayArrow className="text-4xl" />
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">Resume</span>
+              </button>
+
+              <button 
+                onClick={resetGame}
+                className="group flex flex-col items-center gap-2"
+              >
+                <div className="w-16 h-16 flex items-center justify-center bg-white/5 border border-white/10 text-white rounded-full group-hover:bg-white/20 transition-all group-active:scale-90">
+                  <MdRefresh className="text-3xl" />
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">Restart</span>
+              </button>
+
+              <button 
+                onClick={() => router.push('/')}
+                className="group flex flex-col items-center gap-2"
+              >
+                <div className="w-16 h-16 flex items-center justify-center bg-white/5 border border-white/10 text-white rounded-full group-hover:bg-rose-900/40 transition-all group-active:scale-90">
+                  <MdHome className="text-3xl" />
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">Exit</span>
+              </button>
+            </div>
+          </div>
+          <p className="absolute bottom-12 text-white/20 text-[10px] uppercase tracking-[0.5em]">Press ESC to return</p>
+        </div>
+      )}
+
+      {/* --- GAME OVER --- */}
+      {gameOver && (
+        <div className="absolute inset-0 z-70 flex flex-col items-center justify-center bg-black/95 backdrop-blur-xl">
+          <h1 className="text-6xl font-black text-rose-700 mb-6 italic uppercase tracking-tighter">You lost</h1>
+          <button onClick={resetGame} className="px-10 py-4 bg-rose-600 text-white font-black rounded-full uppercase text-sm border-b-4 border-rose-800 transition-all active:translate-y-1 active:border-b-0">Retry Minigame</button>
+        </div>
+      )}
+
+      {/* --- HUD --- */}
+      <div className="absolute top-8 left-8 z-20 flex flex-col gap-4 pointer-events-none text-white">
+        <div className="flex items-center gap-3">
+          <div className="w-1.5 h-10 bg-rose-600 shadow-[0_0_10px_#f43f5e]"></div>
+          <div><p className="text-[10px] text-rose-500 font-bold uppercase tracking-widest leading-none mb-1">Stability</p><span className="font-black text-3xl">{lives}</span></div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="w-1.5 h-10 bg-white"></div>
+          <div><p className="text-[10px] text-neutral-500 font-bold uppercase tracking-widest leading-none mb-1">Essence</p><span className="font-black text-3xl tabular-nums">{score}</span></div>
+        </div>
+      </div>
+
+      {/* --- CANVAS --- */}
+      <div className="relative p-1 bg-white/5 rounded-3xl">
+        <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="rounded-2xl bg-[#050000] shadow-2xl" />
+      </div>
+
+      <p className="absolute bottom-8 text-neutral-600 text-[10px] uppercase tracking-[0.4em] font-bold">
+        Move: [WASD / ARROWS] • Pause: [ESC]
+      </p>
+    </div>
+  );
+}
