@@ -4,22 +4,21 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { MdElectricBolt, MdDarkMode } from "react-icons/md";
 import { GiSpoon } from "react-icons/gi";
-import { FiBookOpen } from "react-icons/fi";
+import { FiBookOpen, FiGithub } from "react-icons/fi"; // Adicionado FiGithub
 
-// Dados dos Rituais atualizados com as novas propriedades de cores de sistema
+// Dados dos Rituais...
 const RITUALS = [
   {
     id: 'kitsune',
     title: 'Kitsune',
     tag: 'Kairiki Illusion Minigame',
-    description: 'The Illusion of the Void. Challenge the spectral Zoroark in a puzzle of shifting realities.',
+    description: 'Practice the illusion of Kitsune Terror. Walk against the Kairiki ground punches to avoid get hit by the shockwave.',
     img: './zoroark.png',
     color: 'text-rose-400',
     bgGradient: 'from-rose-400/20',
     link: '/minigames/kitsune',
     btnClass: 'bg-black text-rose-400 border border-rose-400 shadow-[0_10px_30px_rgba(251,113,133,0.3)]',
     indicatorColor: 'bg-rose-500 shadow-[0_0_12px_#fb7185]',
-    // Cores para a navegação lateral
     activeBorder: 'border-rose-500',
     activeBg: 'bg-rose-500/10',
     activeText: 'text-rose-400'
@@ -35,7 +34,6 @@ const RITUALS = [
     link: '/minigames/raito',
     btnClass: 'bg-white text-blue-600 shadow-[0_10px_30px_rgba(59,130,246,0.4)]',
     indicatorColor: 'bg-blue-500 shadow-[0_0_12px_#3b82f6]',
-    // Cores para a navegação lateral
     activeBorder: 'border-blue-500',
     activeBg: 'bg-blue-500/10',
     activeText: 'text-blue-400'
@@ -44,14 +42,13 @@ const RITUALS = [
     id: 'seishin',
     title: 'Seishin',
     tag: 'Seishin\'s turn dance Minigame',
-    description: 'A psionic resonance of gold. Shiny Alakazam awaits those who can master the flow of temporal shifts.',
+    description: 'Practice the psychic dance of Senshin Terror. Step on the right tile at the right time to master the dance and avoid the psychic backlash.',
     img: './senshinn.png',
     color: 'text-yellow-400',
     bgGradient: 'from-yellow-400/20',
-    link: '/minigames/sensshin',
+    link: '/minigames/seishin',
     btnClass: 'bg-violet-700 text-black border-2 border-emerald-400 shadow-[0_10px_30px_rgba(167,139,250,0.4)]',
     indicatorColor: 'bg-violet-600 shadow-[0_0_12px_#7c3aed]',
-    // Cores para a navegação lateral
     activeBorder: 'border-violet-600',
     activeBg: 'bg-violet-600/10',
     activeText: 'text-violet-400'
@@ -77,11 +74,22 @@ export default function HomePage() {
         <div className="hidden md:flex items-center space-x-8">
           <NavLink label="Rituals" active />
         </div>
-        <div className="flex items-center gap-4 text-neutral-400"></div>
+        <div className="flex items-center gap-4">
+           {/* Versão alternativa do botão no Topo caso prefira */}
+           <a 
+             href="https://github.com/bauk17" 
+             target="_blank" 
+             rel="noopener noreferrer"
+             className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full transition-all text-neutral-400 hover:text-white"
+           >
+             <FiGithub className="text-xl" />
+             <span className="text-xs font-bold uppercase tracking-widest">bauk17</span>
+           </a>
+        </div>
       </nav>
 
       {/* Side Navigation */}
-      <aside className="fixed left-0 top-0 h-full flex flex-col pt-24 pb-8 bg-neutral-900 w-72 rounded-r-[3rem] shadow-2xl z-40 lg:flex border-r border-white/5">
+      <aside className="fixed left-0 top-0 h-full flex flex-col pt-24 pb-8 bg-neutral-900 w-72 rounded-r-[3rem] shadow-2xl z-40 border-r border-white/5">
         <div className="px-8 mb-10">
           <h2 className="text-violet-400 text-sm font-medium tracking-wide uppercase">Nightmare Terrors</h2>
           <p className="text-neutral-500 text-xs">Dance Minigames</p>
@@ -110,11 +118,31 @@ export default function HomePage() {
             activeStyles={{ border: 'border-white', bg: 'bg-white/5', text: 'text-white' }}
           />
         </div>
+
+        {/* GitHub Link na Base da Sidebar */}
+        <div className="px-6 mt-auto">
+          <a 
+            href="https://github.com/bauk17"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between p-4 bg-black/40 hover:bg-black/60 border border-white/5 rounded-2xl transition-all group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-neutral-800 rounded-lg group-hover:text-rose-400 transition-colors">
+                <FiGithub className="text-xl" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-tighter">Developer</span>
+                <span className="text-sm font-black italic uppercase tracking-widest">bauk17</span>
+              </div>
+            </div>
+            <span className="text-neutral-600 group-hover:text-white transition-colors">↗</span>
+          </a>
+        </div>
       </aside>
 
       <main className="lg:ml-72 pt-20">
         <section className="relative h-[85vh] min-h-175 w-full overflow-hidden">
-          {/* ... resto do carrossel permanece o mesmo ... */}
           <div className="relative h-full w-full">
              {RITUALS.map((ritual, idx) => (
                <div 
@@ -183,7 +211,6 @@ const NavLink = ({ label, active = false }: { label: string; active?: boolean })
   </a>
 );
 
-// Componente SideNavItem atualizado para suportar cores dinâmicas de estado ativo
 const SideNavItem = ({ 
   icon: Icon, 
   label, 
