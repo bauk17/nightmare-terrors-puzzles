@@ -12,6 +12,7 @@ const CANVAS_WIDTH = 640;
 const CANVAS_HEIGHT = 480;
 const STEP_DELAY = 490;
 const SPAWN_INTERVAL_MS = STEP_DELAY * 2;
+const EDGE_FIELD_SIZE = 3;
 
 type Wave = {
   step: number;
@@ -37,11 +38,11 @@ export default function RhythmGame() {
   const [isPaused, setIsPaused] = useState(false);
   const [lives, setLives] = useState(5);
   const [score, setScore] = useState(0);
-  const [hitIntensity, setHitIntensity] = useState(0); // Controle do efeito visual de hit
+  const [hitIntensity, setHitIntensity] = useState(0);
 
   const playerRef = useRef<Player>({
     gridX: MAP_RADIUS,
-    gridY: MAP_RADIUS + 2, // Começa um pouco afastado para não colidir no spawn
+    gridY: MAP_RADIUS + 2,
     visualX: MAP_RADIUS * TILE_SIZE,
     visualY: (MAP_RADIUS + 2) * TILE_SIZE,
     health: 5,
@@ -113,7 +114,6 @@ export default function RhythmGame() {
       const player = playerRef.current;
       const keys = keysRef.current;
 
-      // Diminui o efeito de hit suavemente
       if (hitIntensity > 0) {
         setHitIntensity(prev => Math.max(0, prev - 0.05));
       }
@@ -131,13 +131,27 @@ export default function RhythmGame() {
         if (keys['arrowleft'] || keys['a']) nX--; 
         else if (keys['arrowright'] || keys['d']) nX++;
 
-        // Lógica de colisão com o centro (onde está o Electabuzz)
         const isCenter = nX === MAP_RADIUS && nY === MAP_RADIUS;
 
         if ((nX !== player.gridX || nY !== player.gridY) && nX >= 0 && nX < MAP_SIZE && nY >= 0 && nY < MAP_SIZE && !isCenter) {
           player.gridX = nX; player.gridY = nY;
           player.isMoving = true;
         }
+      }
+
+      // --- LÓGICA DO CAMPO ELÉTRICO NAS BORDAS ---
+      const isInEdgeField = 
+        player.gridX < EDGE_FIELD_SIZE || 
+        player.gridX >= MAP_SIZE - EDGE_FIELD_SIZE || 
+        player.gridY < EDGE_FIELD_SIZE || 
+        player.gridY >= MAP_SIZE - EDGE_FIELD_SIZE;
+
+      if (isInEdgeField) {
+        // Dano constante por frame enquanto estiver na borda
+        player.health -= 0.02; 
+        setLives(Math.ceil(player.health));
+        if (hitIntensity < 0.3) setHitIntensity(0.4);
+        if (player.health <= 0) setGameOver(true);
       }
 
       if (currentTime - lastSpawnTimeRef.current >= SPAWN_INTERVAL_MS) {
@@ -154,8 +168,8 @@ export default function RhythmGame() {
 
           if (pDist === wDist) {
             player.health--; w.hitPlayer = true;
-            setLives(player.health);
-            setHitIntensity(1); // Dispara o efeito visual
+            setLives(Math.ceil(player.health));
+            setHitIntensity(1); 
             if (player.health <= 0) setGameOver(true);
           } else if (wDist < pDist && !w.hitPlayer) {
             w.hitPlayer = true; scoreRef.current += 100; setScore(scoreRef.current);
@@ -170,7 +184,6 @@ export default function RhythmGame() {
       ctx.save();
       const player = playerRef.current;
       
-      // Efeito de shake leve na câmera quando hitado
       const shake = hitIntensity * 8;
       const offsetX = (Math.random() - 0.5) * shake;
       const offsetY = (Math.random() - 0.5) * shake;
@@ -187,6 +200,24 @@ export default function RhythmGame() {
           ctx.lineWidth = 1;
           ctx.strokeRect(tx, ty, TILE_SIZE, TILE_SIZE);
 
+          // --- DESENHO DO CAMPO ELÉTRICO NAS BORDAS ---
+          const isEdgeTile = 
+            c < EDGE_FIELD_SIZE || 
+            c >= MAP_SIZE - EDGE_FIELD_SIZE || 
+            r < EDGE_FIELD_SIZE || 
+            r >= MAP_SIZE - EDGE_FIELD_SIZE;
+
+          if (isEdgeTile) {
+            ctx.fillStyle = "rgba(255, 255, 0, 0.08)";
+            ctx.fillRect(tx, ty, TILE_SIZE, TILE_SIZE);
+            
+            // Efeito de faísca aleatória
+            if (Math.random() > 0.99) {
+              ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+              ctx.strokeRect(tx + 4, ty + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+            }
+          }
+
           if (wavesRef.current.some(w => tileDist === (MAP_RADIUS - w.step))) {
             ctx.fillStyle = "rgba(0, 255, 255, 0.15)";
             ctx.fillRect(tx, ty, TILE_SIZE, TILE_SIZE);
@@ -202,21 +233,18 @@ export default function RhythmGame() {
         }
       }
 
-      // Renderiza o Electabuzz no centro
       if (buzzImgRef.current) {
         const centerX = MAP_RADIUS * TILE_SIZE;
         const centerY = MAP_RADIUS * TILE_SIZE;
         ctx.drawImage(buzzImgRef.current, centerX - 8, centerY - 16, 48, 48);
       }
       
-      // Player (Muda de cor no Hit)
       ctx.fillStyle = hitIntensity > 0.1 ? "#ff4d4d" : "#00ffcc"; 
       ctx.shadowBlur = hitIntensity > 0.1 ? 25 : 15; 
       ctx.shadowColor = hitIntensity > 0.1 ? "#ff4d4d" : "#00ffcc";
       ctx.fillRect(player.visualX, player.visualY, TILE_SIZE, TILE_SIZE);
       ctx.restore();
 
-      // Overlay de Flash Vermelho na Tela (Vignette)
       if (hitIntensity > 0) {
         ctx.fillStyle = `rgba(255, 0, 0, ${hitIntensity * 0.3})`;
         ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -234,7 +262,6 @@ export default function RhythmGame() {
   return (
     <div className="relative flex items-center justify-center w-full h-screen bg-[#050505] font-mono overflow-hidden">
       
-      {/* Botão Close */}
       <button 
         onClick={() => router.push('/')}
         className="absolute top-8 right-8 z-50 p-3 bg-neutral-900/80 hover:bg-cyan-600/20 border border-white/5 hover:border-cyan-500/50 rounded-full text-white transition-all group active:scale-90 backdrop-blur-md"
@@ -242,7 +269,6 @@ export default function RhythmGame() {
         <MdClose className="text-2xl group-hover:rotate-90 transition-transform" />
       </button>
 
-      {/* Interface de Pausa */}
       {isPaused && !gameOver && (
         <div className="absolute inset-0 z-60 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md">
           <div className="flex flex-col items-center animate-in fade-in zoom-in duration-300">
@@ -275,7 +301,6 @@ export default function RhythmGame() {
         </div>
       )}
 
-      {/* Game Over */}
       {gameOver && (
               <div className="absolute inset-0 z-70 flex flex-col items-center justify-center bg-black/95 backdrop-blur-2xl">
                 <h1 className="text-6xl font-black text-rose-600 mb-2 italic uppercase">You lost</h1>
@@ -291,7 +316,6 @@ export default function RhythmGame() {
               </div>
             )}
 
-      {/* HUD */}
       <div className="absolute top-8 left-8 z-20 flex flex-col gap-4 pointer-events-none">
         <div className="flex items-center gap-3">
             <div className="w-1 h-12 bg-rose-500 shadow-[0_0_10px_#f43f5e]"></div>
