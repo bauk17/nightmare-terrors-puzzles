@@ -85,7 +85,7 @@ export default function KitsuneRitual() {
   };
 
   useEffect(() => {
-    // Inicialização de um céu estrelado denso
+    
     const numStars = 400; 
     const starColors = ["#ffffff", "#ffe9e9", "#d1e7ff", "#fff4d6"];
     const newStars = [];
@@ -201,7 +201,8 @@ export default function KitsuneRitual() {
             const pDist = getOctagonalDist(player.gridX, player.gridY);
             
             if (pDist === w.step && !w.hitPlayer) {
-              player.health--; w.hitPlayer = true;
+              player.health--; 
+              w.hitPlayer = true;
               setLives(player.health);
               setHitEffect(0.6);
               if (player.health <= 0) setGameOver(true);
@@ -211,7 +212,7 @@ export default function KitsuneRitual() {
               setScore(scoreRef.current);
             }
           }
-          if (w.step > 7) wavesRef.current.splice(i, 1);
+          if (w.step > DEAD_ZONE_RADIUS + 2) wavesRef.current.splice(i, 1);
         }
       }
     };
