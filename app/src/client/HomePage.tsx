@@ -4,9 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { MdElectricBolt, MdDarkMode } from "react-icons/md";
 import { GiSpoon } from "react-icons/gi";
-import { FiBookOpen, FiGithub } from "react-icons/fi"; // Adicionado FiGithub
-
-
+import { FiBookOpen, FiGithub } from "react-icons/fi";
 
 // Dados dos Rituais...
 const RITUALS = [
@@ -77,7 +75,6 @@ export default function HomePage() {
           <NavLink label="Terrors" active />
         </div>
         <div className="flex items-center gap-4">
-           {/* Versão alternativa do botão no Topo caso prefira */}
            <a 
              href="https://github.com/bauk17" 
              target="_blank" 
@@ -101,6 +98,7 @@ export default function HomePage() {
             <SideNavItem 
               key={ritual.id}
               icon={ritual.id === 'kitsune' ? MdDarkMode : ritual.id === 'raito' ? MdElectricBolt : GiSpoon} 
+              img={ritual.img} // Passando a imagem
               label={ritual.title} 
               active={activeSlide === index} 
               onClick={() => setActiveSlide(index)}
@@ -215,13 +213,15 @@ const NavLink = ({ label, active = false }: { label: string; active?: boolean })
 
 const SideNavItem = ({ 
   icon: Icon, 
+  img, 
   label, 
   active = false, 
   onClick, 
   hoverColor,
-  activeStyles 
+  activeStyles,
 }: { 
   icon: any; 
+  img?: string; 
   label: string; 
   active?: boolean; 
   onClick?: () => void; 
@@ -230,14 +230,41 @@ const SideNavItem = ({
 }) => (
   <button 
     onClick={onClick}
-    className={`w-full flex items-center gap-4 px-6 py-4 transition-all group border-l-4 ${
+    // Removido o 'rounded-xl'. Mantido exatamente seu layout original com overflow-hidden.
+    className={`relative w-full flex items-center gap-4 px-6 py-4 transition-all group border-l-4 overflow-hidden ${
       active 
       ? `${activeStyles.bg} ${activeStyles.text} ${activeStyles.border} translate-x-2` 
       : `border-transparent text-neutral-500 hover:bg-neutral-800 ${hoverColor}`
     }`}
   >
-    <Icon className={`text-lg transition-colors ${active ? activeStyles.text : `group-hover:text-inherit`}`} />
-    <span className="text-sm font-medium tracking-wide uppercase">{label}</span>
+    {/* Background Image Container */}
+    {img && (
+      <div 
+        // O container ocupa todo o botão (inset-0)
+        className={`absolute inset-0 z-0 pointer-events-none transition-all duration-700 overflow-hidden ${
+          active ? 'opacity-30' : 'opacity-0 group-hover:opacity-15'
+        }`}
+        style={{
+          WebkitMaskImage: 'linear-gradient(to right, transparent 20%, black 100%)',
+          maskImage: 'linear-gradient(to right, transparent 20%, black 100%)',
+        }}
+      >
+        <img 
+          src={img} 
+          alt="" 
+          // 'right-0' garante que a imagem fique no limite direito sem vazar para fora.
+          className={`absolute right-0 top-1/2 -translate-y-1/2 h-[130%] object-contain object-right transition-transform duration-700 ${
+            active ? 'scale-105 rotate-[-5deg]' : 'scale-100'
+          }`}
+        />
+      </div>
+    )}
+
+    {/* Conteúdo original preservado com z-10 */}
+    <div className="relative z-10 flex items-center gap-4">
+      <Icon className={`text-lg transition-colors ${active ? activeStyles.text : `group-hover:text-inherit`}`} />
+      <span className="text-sm font-medium tracking-wide uppercase">{label}</span>
+    </div>
   </button>
 );
 
