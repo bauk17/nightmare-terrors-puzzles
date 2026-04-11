@@ -147,7 +147,6 @@ export default function RhythmGame() {
         player.gridY >= MAP_SIZE - EDGE_FIELD_SIZE;
 
       if (isInEdgeField) {
-        // Dano constante por frame enquanto estiver na borda
         player.health -= 0.02; 
         setLives(Math.ceil(player.health));
         if (hitIntensity < 0.3) setHitIntensity(0.4);
@@ -200,7 +199,6 @@ export default function RhythmGame() {
           ctx.lineWidth = 1;
           ctx.strokeRect(tx, ty, TILE_SIZE, TILE_SIZE);
 
-          // --- DESENHO DO CAMPO ELÉTRICO NAS BORDAS ---
           const isEdgeTile = 
             c < EDGE_FIELD_SIZE || 
             c >= MAP_SIZE - EDGE_FIELD_SIZE || 
