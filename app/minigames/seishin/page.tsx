@@ -4,6 +4,7 @@ import React, { useRef, useEffect, useLayoutEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MdClose } from "react-icons/md";
 import { startCanvasRuntime } from '../_shared/canvasRuntime';
+import { resizeCanvasToViewport } from '../_shared/canvasViewport';
 import { GameHud, GameOverOverlay, PauseOverlay } from '../_shared/MinigameOverlays';
 import { useMovementDuration } from '../_shared/useMovementDuration';
 import { advanceGridMovement, beginGridMovement, CANVAS_HEIGHT, CANVAS_WIDTH, captureGridInput, getNextGridDirection, getOctagonalDist, MAP_RADIUS, MAP_SIZE, PLAYER_STEP_DURATION_MS, TILE_SIZE } from '../_shared/gameUtils';
@@ -27,6 +28,7 @@ const PULL_TARGETS = [
 export default function SeishinMinigame() {
   const router = useRouter();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewportRef = useRef({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, scale: 1 });
   const buzzImgRef = useRef<HTMLImageElement | null>(null);
   
   const [gameOver, setGameOver] = useState(false);
@@ -127,6 +129,7 @@ export default function SeishinMinigame() {
 
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const stopResizingCanvas = resizeCanvasToViewport(canvas, viewportRef);
     const update = (currentTime: number) => {
       const player = playerRef.current;
       const { gamePhase: currentGamePhase, hitIntensity: currentHitIntensity } = gameStateRef.current;
@@ -200,12 +203,14 @@ export default function SeishinMinigame() {
     };
 
     const draw = (ctx: CanvasRenderingContext2D) => {
-      ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      const viewport = viewportRef.current;
+      ctx.setTransform(viewport.scale, 0, 0, viewport.scale, 0, 0);
+      ctx.clearRect(0, 0, viewport.width, viewport.height);
       ctx.save();
       const player = playerRef.current;
       const currentHitIntensity = gameStateRef.current.hitIntensity;
       const shake = currentHitIntensity * 8;
-      ctx.translate(CANVAS_WIDTH / 2 - (player.visualX + 16) + (Math.random() - 0.5) * shake, CANVAS_HEIGHT / 2 - (player.visualY + 16) + (Math.random() - 0.5) * shake);
+      ctx.translate(viewport.width / 2 - (player.visualX + 16) + (Math.random() - 0.5) * shake, viewport.height / 2 - (player.visualY + 16) + (Math.random() - 0.5) * shake);
 
       for (let r = 0; r < MAP_SIZE; r++) {
         for (let c = 0; c < MAP_SIZE; c++) {
@@ -229,7 +234,7 @@ export default function SeishinMinigame() {
       ctx.restore();
     };
 
-    return startCanvasRuntime(canvas, keysRef, {
+    const stopCanvasRuntime = startCanvasRuntime(canvas, keysRef, {
       onFrame: (context, currentTime) => {
         const { gameOver: currentGameOver, isPaused: currentIsPaused } = gameStateRef.current;
         if (!currentGameOver && !currentIsPaused) update(currentTime);
@@ -252,6 +257,11 @@ export default function SeishinMinigame() {
         movementInputBufferRef.current = null;
       },
     });
+
+    return () => {
+      stopCanvasRuntime();
+      stopResizingCanvas();
+    };
   }, []);
 
   const togglePause = () => {
@@ -262,7 +272,7 @@ export default function SeishinMinigame() {
   };
 
   return (
-    <div className="relative flex items-center justify-center w-full h-screen bg-[#050505] font-mono overflow-hidden">
+    <div className="fixed inset-0 overflow-hidden bg-[#050505] font-mono">
       {/* Botão de Fechar Rápido */}
       <button onClick={() => router.push('/')} className="absolute top-8 right-8 z-50 p-3 bg-white/5 border border-white/10 rounded-full text-white active:scale-90 hover:bg-white/10 transition-colors">
         <MdClose className="text-2xl" />
@@ -304,9 +314,13 @@ export default function SeishinMinigame() {
       {/* Status da HUD */}
       <GameHud variant="seishin" lives={lives} score={score} />
 
-      <div className="relative p-1 bg-white/5 rounded-3xl">
-        <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="rounded-2xl bg-[#0a0a0a] shadow-2xl" />
-      </div>
+      <canvas
+        ref={canvasRef}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        aria-label="Seishin minigame board"
+        className="absolute inset-0 block h-full w-full bg-[#0a0a0a]"
+      />
 
       <p className="absolute bottom-8 text-neutral-600 text-[10px] uppercase tracking-[0.4em] font-bold italic">Move: [WASD / ARROWS] • Pause: [ESC]</p>
     </div>

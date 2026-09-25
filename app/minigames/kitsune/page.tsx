@@ -4,6 +4,7 @@ import React, { useRef, useEffect, useLayoutEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MdClose } from "react-icons/md";
 import { startCanvasRuntime } from '../_shared/canvasRuntime';
+import { resizeCanvasToViewport } from '../_shared/canvasViewport';
 import { GameHud, GameOverOverlay, PauseOverlay } from '../_shared/MinigameOverlays';
 import { useMovementDuration } from '../_shared/useMovementDuration';
 import { advanceGridMovement, beginGridMovement, CANVAS_HEIGHT, CANVAS_WIDTH, captureGridInput, getNextGridDirection, getOctagonalDist, MAP_RADIUS, MAP_SIZE, TILE_SIZE } from '../_shared/gameUtils';
@@ -23,6 +24,7 @@ type Wave = {
 export default function KitsuneRitual() {
   const router = useRouter();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewportRef = useRef({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, scale: 1 });
   const machampImgRef = useRef<HTMLImageElement | null>(null);
   
   const [gameOver, setGameOver] = useState(false);
@@ -102,6 +104,7 @@ export default function KitsuneRitual() {
 
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const stopResizingCanvas = resizeCanvasToViewport(canvas, viewportRef);
     const update = (currentTime: number) => {
       const player = playerRef.current;
       const keys = keysRef.current;
@@ -182,12 +185,16 @@ export default function KitsuneRitual() {
 
     const draw = (ctx: CanvasRenderingContext2D) => {
       const { statusText: currentStatusText, hitEffect: currentHitEffect, isPaused: currentIsPaused } = gameStateRef.current;
-      ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      const viewport = viewportRef.current;
+      ctx.setTransform(viewport.scale, 0, 0, viewport.scale, 0, 0);
+      ctx.clearRect(0, 0, viewport.width, viewport.height);
+      ctx.fillStyle = "#010005";
+      ctx.fillRect(0, 0, viewport.width, viewport.height);
       ctx.save();
       const player = playerRef.current;
 
       // Câmera centrada no player
-      ctx.translate(CANVAS_WIDTH / 2 - (player.visualX + 16), CANVAS_HEIGHT / 2 - (player.visualY + 16));
+      ctx.translate(viewport.width / 2 - (player.visualX + 16), viewport.height / 2 - (player.visualY + 16));
 
       // 1. Fundo do Espaço Profundo
       ctx.fillStyle = "#010005"; 
@@ -295,23 +302,24 @@ export default function KitsuneRitual() {
 
       // Vinheta de Dano
       if (currentHitEffect > 0) {
+        const vignetteSize = Math.min(viewport.width, viewport.height);
         const grad = ctx.createRadialGradient(
-          CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH * 0.2,
-          CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH * 0.6
+          viewport.width / 2, viewport.height / 2, vignetteSize * 0.2,
+          viewport.width / 2, viewport.height / 2, vignetteSize * 0.6
         );
         grad.addColorStop(0, 'rgba(255, 0, 0, 0)');
         grad.addColorStop(1, `rgba(180, 0, 0, ${currentHitEffect})`);
         ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.fillRect(0, 0, viewport.width, viewport.height);
       }
 
       if (currentStatusText && !currentIsPaused) {
         ctx.fillStyle = "#ff1e4b"; ctx.font = "bold 24px monospace"; ctx.textAlign = "center";
-        ctx.fillText(currentStatusText, CANVAS_WIDTH / 2, 80);
+        ctx.fillText(currentStatusText, viewport.width / 2, 80);
       }
     };
 
-    return startCanvasRuntime(canvas, keysRef, {
+    const stopCanvasRuntime = startCanvasRuntime(canvas, keysRef, {
       configureContext: context => {
         context.imageSmoothingEnabled = false;
       },
@@ -334,10 +342,15 @@ export default function KitsuneRitual() {
         movementInputBufferRef.current = null;
       },
     });
+
+    return () => {
+      stopCanvasRuntime();
+      stopResizingCanvas();
+    };
   }, []);
 
   return (
-    <div className="relative flex items-center justify-center w-full h-screen bg-[#020000] font-mono overflow-hidden">
+    <div className="fixed inset-0 overflow-hidden bg-[#020000] font-mono">
       <button onClick={() => router.push('/')} className="absolute top-8 right-8 z-50 p-3 bg-white/5 border border-white/10 rounded-full text-white active:scale-90 hover:bg-white/10 transition-colors">
         <MdClose className="text-2xl" />
       </button>
@@ -366,9 +379,13 @@ export default function KitsuneRitual() {
 
       <GameHud variant="kitsune" lives={lives} score={score} />
 
-      <div className="relative p-1 bg-white/5 rounded-3xl">
-        <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="rounded-2xl bg-[#010005] shadow-2xl" />
-      </div>
+      <canvas
+        ref={canvasRef}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        aria-label="Kitsune minigame board"
+        className="absolute inset-0 block h-full w-full bg-[#010005]"
+      />
 
       <p className="absolute bottom-8 text-neutral-600 text-[10px] uppercase tracking-[0.4em] font-bold">
         Move: [WASD / ARROWS] • Pause: [ESC]

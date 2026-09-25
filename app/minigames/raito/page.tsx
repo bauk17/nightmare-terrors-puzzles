@@ -4,6 +4,7 @@ import React, { useRef, useEffect, useLayoutEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MdClose } from "react-icons/md";
 import { startCanvasRuntime } from '../_shared/canvasRuntime';
+import { resizeCanvasToViewport } from '../_shared/canvasViewport';
 import { GameHud, GameOverOverlay, PauseOverlay } from '../_shared/MinigameOverlays';
 import { useMovementDuration } from '../_shared/useMovementDuration';
 import { advanceGridMovement, beginGridMovement, CANVAS_HEIGHT, CANVAS_WIDTH, captureGridInput, getNextGridDirection, getOctagonalDist, MAP_RADIUS, MAP_SIZE, TILE_SIZE } from '../_shared/gameUtils';
@@ -23,6 +24,7 @@ type Wave = {
 export default function RhythmGame() {
   const router = useRouter();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewportRef = useRef({ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, scale: 1 });
   const buzzImgRef = useRef<HTMLImageElement | null>(null);
   
   const [gameOver, setGameOver] = useState(false);
@@ -79,6 +81,7 @@ export default function RhythmGame() {
 
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const stopResizingCanvas = resizeCanvasToViewport(canvas, viewportRef);
     const update = (currentTime: number) => {
       const player = playerRef.current;
       const keys = keysRef.current;
@@ -143,7 +146,9 @@ export default function RhythmGame() {
     };
 
     const draw = (ctx: CanvasRenderingContext2D) => {
-      ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+      const viewport = viewportRef.current;
+      ctx.setTransform(viewport.scale, 0, 0, viewport.scale, 0, 0);
+      ctx.clearRect(0, 0, viewport.width, viewport.height);
       ctx.save();
       const player = playerRef.current;
       const currentHitIntensity = gameStateRef.current.hitIntensity;
@@ -152,7 +157,7 @@ export default function RhythmGame() {
       const offsetX = (Math.random() - 0.5) * shake;
       const offsetY = (Math.random() - 0.5) * shake;
 
-      ctx.translate(CANVAS_WIDTH / 2 - (player.visualX + 16) + offsetX, CANVAS_HEIGHT / 2 - (player.visualY + 16) + offsetY);
+      ctx.translate(viewport.width / 2 - (player.visualX + 16) + offsetX, viewport.height / 2 - (player.visualY + 16) + offsetY);
 
       for (let r = 0; r < MAP_SIZE; r++) {
         for (let c = 0; c < MAP_SIZE; c++) {
@@ -210,11 +215,11 @@ export default function RhythmGame() {
 
       if (currentHitIntensity > 0) {
         ctx.fillStyle = `rgba(255, 0, 0, ${currentHitIntensity * 0.3})`;
-        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        ctx.fillRect(0, 0, viewport.width, viewport.height);
       }
     };
 
-    return startCanvasRuntime(canvas, keysRef, {
+    const stopCanvasRuntime = startCanvasRuntime(canvas, keysRef, {
       onFrame: (context, currentTime) => {
         const { gameOver: currentGameOver, isPaused: currentIsPaused } = gameStateRef.current;
         if (!currentGameOver && !currentIsPaused) update(currentTime);
@@ -234,10 +239,15 @@ export default function RhythmGame() {
       },
       preventArrowScroll: true,
     });
+
+    return () => {
+      stopCanvasRuntime();
+      stopResizingCanvas();
+    };
   }, []);
 
   return (
-    <div className="relative flex items-center justify-center w-full h-screen bg-[#050505] font-mono overflow-hidden">
+    <div className="fixed inset-0 overflow-hidden bg-[#050505] font-mono">
       
       <button 
         onClick={() => router.push('/')}
@@ -270,14 +280,13 @@ export default function RhythmGame() {
 
       <GameHud variant="raito" lives={lives} score={score} />
 
-      <div className="relative p-1 bg-white/5 rounded-3xl">
-        <canvas 
-          ref={canvasRef} 
-          width={CANVAS_WIDTH} 
-          height={CANVAS_HEIGHT} 
-          className="rounded-2xl bg-[#0a0a0a] shadow-2xl" 
-        />
-      </div>
+      <canvas
+        ref={canvasRef}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        aria-label="Raito minigame board"
+        className="absolute inset-0 block h-full w-full bg-[#0a0a0a]"
+      />
 
       <p className="absolute bottom-8 text-neutral-600 text-[10px] uppercase tracking-[0.4em] font-bold">
         Move: [WASD / ARROWS] • Pause: [ESC]

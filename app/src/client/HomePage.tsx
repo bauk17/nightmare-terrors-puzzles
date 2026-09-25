@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { MdElectricBolt, MdDarkMode } from "react-icons/md";
+import { MdElectricBolt, MdDarkMode, MdGridOn } from "react-icons/md";
 import { GiSpoon } from "react-icons/gi";
 import { FiBookOpen, FiGithub } from "react-icons/fi";
 
@@ -52,6 +52,21 @@ const RITUALS = [
     activeBorder: 'border-violet-600',
     activeBg: 'bg-violet-600/10',
     activeText: 'text-violet-400'
+  },
+  {
+    id: 'missgno',
+    title: 'Missgno',
+    tag: 'Glitch Entity Minigame',
+    description: 'Survive the spikes emanating from Missgno. Dodge each expanding wave before it reaches your tile.',
+    img: '/missgno_banner.png',
+    color: 'text-fuchsia-400',
+    bgGradient: 'from-fuchsia-400/20',
+    link: '/minigames/missgno',
+    btnClass: 'bg-[#170b1a] text-fuchsia-200 border border-fuchsia-400 shadow-[0_10px_30px_rgba(217,70,239,0.3)]',
+    indicatorColor: 'bg-fuchsia-500 shadow-[0_0_12px_#d946ef]',
+    activeBorder: 'border-fuchsia-500',
+    activeBg: 'bg-fuchsia-500/10',
+    activeText: 'text-fuchsia-400',
   }
 ];
 
@@ -97,7 +112,7 @@ export default function HomePage() {
           {RITUALS.map((ritual, index) => (
             <SideNavItem 
               key={ritual.id}
-              icon={ritual.id === 'kitsune' ? MdDarkMode : ritual.id === 'raito' ? MdElectricBolt : GiSpoon} 
+              icon={ritual.id === 'kitsune' ? MdDarkMode : ritual.id === 'raito' ? MdElectricBolt : ritual.id === 'missgno' ? MdGridOn : GiSpoon}
               img={ritual.img} // Passando a imagem
               label={ritual.title} 
               active={activeSlide === index} 

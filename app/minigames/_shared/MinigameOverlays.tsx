@@ -6,7 +6,7 @@ import {
 } from './useMovementDuration';
 import { PLAYER_STEP_DURATION_MS } from './gameUtils';
 
-type Theme = 'cyan' | 'rose' | 'violet';
+type Theme = 'cyan' | 'rose' | 'violet' | 'missgno';
 
 type ThemeStyles = {
   divider: string;
@@ -33,6 +33,12 @@ const themeStyles: Record<Theme, ThemeStyles> = {
     resume: 'group-hover:bg-purple-600',
     exit: 'group-hover:bg-rose-600',
     slider: 'accent-purple-400',
+  },
+  missgno: {
+    divider: 'bg-fuchsia-500 shadow-[0_0_15px_#d946ef]',
+    resume: 'group-hover:bg-fuchsia-600',
+    exit: 'group-hover:bg-fuchsia-900/40',
+    slider: 'accent-fuchsia-400',
   },
 };
 
@@ -147,7 +153,7 @@ export function GameOverOverlay({ score, theme, durationMs, onRestart, onExit, o
   );
 }
 
-type HudVariant = 'raito' | 'kitsune' | 'seishin';
+type HudVariant = 'raito' | 'kitsune' | 'seishin' | 'missgno';
 
 type GameHudProps = {
   variant: HudVariant;
@@ -169,6 +175,11 @@ const hudStyles: Record<HudVariant, { scoreBar: string; scoreLabel: string; scor
   seishin: {
     scoreBar: 'bg-purple-500 shadow-[0_0_10px_#a855f7]',
     scoreLabel: 'text-purple-500',
+    scoreTitle: 'Score',
+  },
+  missgno: {
+    scoreBar: 'bg-fuchsia-500 shadow-[0_0_10px_#d946ef]',
+    scoreLabel: 'text-fuchsia-400',
     scoreTitle: 'Score',
   },
 };
