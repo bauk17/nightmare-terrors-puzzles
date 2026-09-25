@@ -1,30 +1,28 @@
 "use client";
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MdClose, MdPlayArrow, MdRefresh, MdHome } from "react-icons/md";
+import { MdClose } from "react-icons/md";
+import { startCanvasRuntime } from '../_shared/canvasRuntime';
+import { GameHud, GameOverOverlay, PauseOverlay } from '../_shared/MinigameOverlays';
+import { useMovementDuration } from '../_shared/useMovementDuration';
+import { advanceGridMovement, beginGridMovement, CANVAS_HEIGHT, CANVAS_WIDTH, captureGridInput, getNextGridDirection, getOctagonalDist, MAP_RADIUS, MAP_SIZE, PLAYER_STEP_DURATION_MS, TILE_SIZE } from '../_shared/gameUtils';
+import type { GridInputBuffer, PlayerMovement, PlayerState } from '../_shared/gameUtils';
 
 // --- CONSTANTES ---
-const TILE_SIZE = 32;
-const MAP_SIZE = 31;
-const MAP_RADIUS = Math.floor(MAP_SIZE / 2);
-const CANVAS_WIDTH = 640;
-const CANVAS_HEIGHT = 480;
-
 const TARGET_TILE = 4;      
 const OUTER_START_TILE = 8; 
 const MOVE_DURATION = 1050;  
 const WAIT_DURATION = 300; 
 const CYCLE_COOLDOWN = 500; 
-
-type Player = {
-  gridX: number;
-  gridY: number;
-  visualX: number;
-  visualY: number;
-  health: number;
-  isMoving: boolean;
-};
+const DEAD_ZONE_RADIUS = 9;
+const PULL_ANIMATION_DURATION_MS = PLAYER_STEP_DURATION_MS * 2;
+const PULL_TARGETS = [
+  { x: MAP_RADIUS - 1, y: MAP_RADIUS },
+  { x: MAP_RADIUS, y: MAP_RADIUS - 1 },
+  { x: MAP_RADIUS + 1, y: MAP_RADIUS },
+  { x: MAP_RADIUS, y: MAP_RADIUS + 1 },
+];
 
 export default function SeishinMinigame() {
   const router = useRouter();
@@ -39,8 +37,14 @@ export default function SeishinMinigame() {
 
   const [gamePhase, setGamePhase] = useState<'INTRO' | 'PULL' | 'PREP' | 'PLAYING'>('INTRO');
   const [statusMessage, setStatusMessage] = useState("");
+  const { durationMs: playerStepDurationMs, setDurationMs: setPlayerStepDurationMs } = useMovementDuration('seishin');
+  const gameStateRef = useRef({ gameOver, isPaused, hitIntensity, gamePhase, movementDurationMs: playerStepDurationMs });
 
-  const playerRef = useRef<Player>({
+  useLayoutEffect(() => {
+    gameStateRef.current = { gameOver, isPaused, hitIntensity, gamePhase, movementDurationMs: playerStepDurationMs };
+  }, [gameOver, isPaused, hitIntensity, gamePhase, playerStepDurationMs]);
+
+  const playerRef = useRef<PlayerState>({
     gridX: MAP_RADIUS,
     gridY: MAP_RADIUS + 8,
     visualX: MAP_RADIUS * TILE_SIZE,
@@ -55,13 +59,9 @@ export default function SeishinMinigame() {
   const lastWavePositionsRef = useRef<number[]>([]);
   const scoreRef = useRef<number>(0);
   const keysRef = useRef<{ [key: string]: boolean }>({});
+  const movementInputBufferRef = useRef<GridInputBuffer | null>(null);
+  const movementRef = useRef<PlayerMovement | null>(null);
   const cycleCompletedRef = useRef<boolean>(false);
-
-  const getOctagonalDist = (col: number, row: number) => {
-    const dx = Math.abs(col - MAP_RADIUS);
-    const dy = Math.abs(row - MAP_RADIUS);
-    return Math.round(Math.max(dx, dy, (dx + dy) * 0.707));
-  };
 
   // --- LÓGICA DE FASES (RESTAURADA) ---
   useEffect(() => {
@@ -74,8 +74,17 @@ export default function SeishinMinigame() {
     }
     if (gamePhase === 'PULL') {
       setStatusMessage("GRAVITY PULL");
-      playerRef.current.gridX = MAP_RADIUS;
-      playerRef.current.gridY = MAP_RADIUS + 1;
+      if (!movementRef.current) {
+        const target = PULL_TARGETS[Math.floor(Math.random() * PULL_TARGETS.length)];
+        beginGridMovement(
+          playerRef.current,
+          movementRef,
+          target.x,
+          target.y,
+          performance.now(),
+          PULL_ANIMATION_DURATION_MS,
+        );
+      }
       const t = setTimeout(() => setGamePhase('PREP'), 800); 
       return () => clearTimeout(t);
     }
@@ -96,6 +105,9 @@ export default function SeishinMinigame() {
       visualX: MAP_RADIUS * TILE_SIZE, visualY: (MAP_RADIUS + 8) * TILE_SIZE,
       health: 5, isMoving: false,
     };
+    movementInputBufferRef.current = null;
+    movementRef.current = null;
+    keysRef.current = {};
     activeWavesRef.current = [];
     lastWavePositionsRef.current = [];
     scoreRef.current = 0;
@@ -115,51 +127,35 @@ export default function SeishinMinigame() {
 
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => { 
-      keysRef.current[e.key.toLowerCase()] = true; 
-      if (e.key === "Escape" && !gameOver) {
-        setIsPaused(prev => {
-          if (!prev) pauseStartTimeRef.current = performance.now();
-          else cycleStartTimeRef.current += (performance.now() - pauseStartTimeRef.current);
-          return !prev;
-        });
-      }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => { keysRef.current[e.key.toLowerCase()] = false; };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-
-    let animationFrameId: number;
-
     const update = (currentTime: number) => {
       const player = playerRef.current;
-      if (hitIntensity > 0) setHitIntensity(prev => Math.max(0, prev - 0.05));
+      const { gamePhase: currentGamePhase, hitIntensity: currentHitIntensity } = gameStateRef.current;
+      if (currentHitIntensity > 0) setHitIntensity(prev => Math.max(0, prev - 0.05));
 
-      player.visualX += (player.gridX * TILE_SIZE - player.visualX) * 0.25;
-      player.visualY += (player.gridY * TILE_SIZE - player.visualY) * 0.25;
+      advanceGridMovement(player, movementRef, currentTime);
 
-      if (gamePhase === 'PLAYING' || gamePhase === 'PREP') {
-        const distMoving = Math.abs(player.gridX * TILE_SIZE - player.visualX) + Math.abs(player.gridY * TILE_SIZE - player.visualY);
-        player.isMoving = distMoving > 0.5;
-
+      if (currentGamePhase === 'PLAYING' || currentGamePhase === 'PREP') {
         if (!player.isMoving) {
-          let nX = player.gridX, nY = player.gridY;
-          if (keysRef.current['w'] || keysRef.current['arrowup']) nY--;
-          else if (keysRef.current['s'] || keysRef.current['arrowdown']) nY++;
-          if (keysRef.current['a'] || keysRef.current['arrowleft']) nX--;
-          else if (keysRef.current['d'] || keysRef.current['arrowright']) nX++;
+          const { x: directionX, y: directionY } = getNextGridDirection(keysRef.current, movementInputBufferRef, currentTime);
+          const nX = player.gridX + directionX;
+          const nY = player.gridY + directionY;
 
-          if ((nX !== player.gridX || nY !== player.gridY) && nX >= 0 && nX < MAP_SIZE && nY >= 0 && nY < MAP_SIZE && !(nX === MAP_RADIUS && nY === MAP_RADIUS)) {
-            player.gridX = nX; player.gridY = nY;
-            player.isMoving = true;
+          if ((directionX !== 0 || directionY !== 0) && (nX !== player.gridX || nY !== player.gridY) && nX >= 0 && nX < MAP_SIZE && nY >= 0 && nY < MAP_SIZE && !(nX === MAP_RADIUS && nY === MAP_RADIUS)) {
+            const distFromCenter = Math.max(Math.abs(nX - MAP_RADIUS), Math.abs(nY - MAP_RADIUS));
+            if (distFromCenter >= DEAD_ZONE_RADIUS) {
+              player.health = 0;
+              setLives(0);
+              setHitIntensity(1);
+              setGameOver(true);
+              return;
+            }
+
+            beginGridMovement(player, movementRef, nX, nY, currentTime, gameStateRef.current.movementDurationMs);
           }
         }
       }
 
-      if (gamePhase === 'PLAYING') {
+      if (currentGamePhase === 'PLAYING') {
         const elapsed = currentTime - cycleStartTimeRef.current;
         const totalCycleTime = (MOVE_DURATION * 2) + WAIT_DURATION + CYCLE_COOLDOWN;
         const phaseTime = elapsed % totalCycleTime;
@@ -207,7 +203,8 @@ export default function SeishinMinigame() {
       ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       ctx.save();
       const player = playerRef.current;
-      const shake = hitIntensity * 8;
+      const currentHitIntensity = gameStateRef.current.hitIntensity;
+      const shake = currentHitIntensity * 8;
       ctx.translate(CANVAS_WIDTH / 2 - (player.visualX + 16) + (Math.random() - 0.5) * shake, CANVAS_HEIGHT / 2 - (player.visualY + 16) + (Math.random() - 0.5) * shake);
 
       for (let r = 0; r < MAP_SIZE; r++) {
@@ -227,24 +224,35 @@ export default function SeishinMinigame() {
       }
 
       if (buzzImgRef.current) ctx.drawImage(buzzImgRef.current, (MAP_RADIUS * TILE_SIZE) - 8, (MAP_RADIUS * TILE_SIZE) - 16, 48, 48);
-      ctx.fillStyle = hitIntensity > 0.1 ? "#ff4d4d" : "#00ffcc"; 
+      ctx.fillStyle = currentHitIntensity > 0.1 ? "#ff4d4d" : "#00ffcc";
       ctx.fillRect(player.visualX, player.visualY, TILE_SIZE, TILE_SIZE);
       ctx.restore();
     };
 
-    const gameLoop = (currentTime: number) => {
-      if (!gameOver && !isPaused) update(currentTime);
-      draw(ctx);
-      animationFrameId = requestAnimationFrame(gameLoop);
-    };
-
-    animationFrameId = requestAnimationFrame(gameLoop);
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [gameOver, isPaused, hitIntensity, gamePhase]);
+    return startCanvasRuntime(canvas, keysRef, {
+      onFrame: (context, currentTime) => {
+        const { gameOver: currentGameOver, isPaused: currentIsPaused } = gameStateRef.current;
+        if (!currentGameOver && !currentIsPaused) update(currentTime);
+        else if (movementRef.current) movementRef.current.lastTime = currentTime;
+        draw(context);
+      },
+      onKeyDown: event => {
+        if (!gameStateRef.current.isPaused && !gameStateRef.current.gameOver) {
+          captureGridInput(keysRef.current, movementInputBufferRef, performance.now());
+        }
+        if (event.key === 'Escape' && !gameStateRef.current.gameOver) {
+          setIsPaused(prev => {
+            if (!prev) pauseStartTimeRef.current = performance.now();
+            else cycleStartTimeRef.current += performance.now() - pauseStartTimeRef.current;
+            return !prev;
+          });
+        }
+      },
+      onBlur: () => {
+        movementInputBufferRef.current = null;
+      },
+    });
+  }, []);
 
   const togglePause = () => {
     if (gameOver) return;
@@ -271,54 +279,30 @@ export default function SeishinMinigame() {
 
       {/* Menu de Pausa */}
       {isPaused && !gameOver && (
-        <div className="absolute inset-0 z-60 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md">
-          <div className="flex flex-col items-center">
-            <h2 className="text-5xl font-black text-white italic uppercase mb-10 tracking-tighter">Game Paused</h2>
-            <div className="flex gap-8">
-              <button onClick={togglePause} className="flex flex-col items-center gap-2 group">
-                <div className="w-16 h-16 flex items-center justify-center bg-white text-black rounded-full group-hover:bg-purple-600 group-hover:text-white transition-all"><MdPlayArrow className="text-4xl" /></div>
-                <span className="text-[10px] font-bold text-white/50 uppercase">Resume</span>
-              </button>
-              <button onClick={resetGame} className="flex flex-col items-center gap-2 group">
-                <div className="w-16 h-16 flex items-center justify-center bg-white/5 border border-white/10 text-white rounded-full group-hover:bg-white/20 transition-all"><MdRefresh className="text-3xl" /></div>
-                <span className="text-[10px] font-bold text-white/50 uppercase">Restart</span>
-              </button>
-              <button onClick={() => router.push('/')} className="flex flex-col items-center gap-2 group">
-                <div className="w-16 h-16 flex items-center justify-center bg-white/5 border border-white/10 text-white rounded-full group-hover:bg-rose-600 transition-all"><MdHome className="text-3xl" /></div>
-                <span className="text-[10px] font-bold text-white/50 uppercase">Exit</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <PauseOverlay
+          theme="violet"
+          durationMs={playerStepDurationMs}
+          onResume={togglePause}
+          onRestart={resetGame}
+          onExit={() => router.push('/')}
+          onDurationChange={setPlayerStepDurationMs}
+        />
       )}
 
       {/* Tela de Game Over */}
       {gameOver && (
-        <div className="absolute inset-0 z-70 flex flex-col items-center justify-center bg-black/95 backdrop-blur-2xl">
-          <h1 className="text-6xl font-black text-rose-600 mb-2 italic uppercase">You lost</h1>
-          <p className="text-white/50 mb-10 font-bold uppercase tracking-widest">Final Score: {score}</p>
-          <div className="flex gap-4">
-            <button onClick={resetGame} className="px-10 py-4 bg-emerald-500 text-black font-black rounded-full uppercase text-xs hover:scale-105 transition-transform flex items-center gap-2">
-              <MdRefresh className="text-xl" /> Retry
-            </button>
-            <button onClick={() => router.push('/')} className="px-10 py-4 bg-white/5 border border-white/10 text-white font-black rounded-full uppercase text-xs hover:bg-white/10 transition-all flex items-center gap-2">
-              <MdHome className="text-xl" /> Exit
-            </button>
-          </div>
-        </div>
+        <GameOverOverlay
+          score={score}
+          theme="violet"
+          durationMs={playerStepDurationMs}
+          onRestart={resetGame}
+          onExit={() => router.push('/')}
+          onDurationChange={setPlayerStepDurationMs}
+        />
       )}
 
       {/* Status da HUD */}
-      <div className="absolute top-8 left-8 z-20 flex flex-col gap-4 pointer-events-none">
-        <div className="flex items-center gap-3">
-            <div className="w-1 h-12 bg-rose-500 shadow-[0_0_10px_#f43f5e]"></div>
-            <div><p className="text-[10px] text-rose-500 font-bold uppercase tracking-widest mb-1">Lifes</p><span className="text-white font-black text-3xl">{lives}</span></div>
-        </div>
-        <div className="flex items-center gap-3">
-            <div className="w-1 h-12 bg-purple-500 shadow-[0_0_10px_#a855f7]"></div>
-            <div><p className="text-[10px] text-purple-500 font-bold uppercase tracking-widest mb-1">Score</p><span className="text-white font-black text-3xl tabular-nums">{score}</span></div>
-        </div>
-      </div>
+      <GameHud variant="seishin" lives={lives} score={score} />
 
       <div className="relative p-1 bg-white/5 rounded-3xl">
         <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="rounded-2xl bg-[#0a0a0a] shadow-2xl" />

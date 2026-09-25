@@ -1,16 +1,16 @@
 "use client";
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MdClose, MdPlayArrow, MdRefresh, MdHome } from "react-icons/md";
+import { MdClose } from "react-icons/md";
+import { startCanvasRuntime } from '../_shared/canvasRuntime';
+import { GameHud, GameOverOverlay, PauseOverlay } from '../_shared/MinigameOverlays';
+import { useMovementDuration } from '../_shared/useMovementDuration';
+import { advanceGridMovement, beginGridMovement, CANVAS_HEIGHT, CANVAS_WIDTH, captureGridInput, getNextGridDirection, getOctagonalDist, MAP_RADIUS, MAP_SIZE, TILE_SIZE } from '../_shared/gameUtils';
+import type { GridInputBuffer, PlayerMovement, PlayerState } from '../_shared/gameUtils';
 
 // --- CONSTANTES ---
-const TILE_SIZE = 32;
-const MAP_SIZE = 31;
-const MAP_RADIUS = Math.floor(MAP_SIZE / 2);
-const CANVAS_WIDTH = 640;
-const CANVAS_HEIGHT = 480;
-const STEP_DELAY = 490;
+const STEP_DELAY = 420;
 const SPAWN_INTERVAL_MS = STEP_DELAY * 2;
 const EDGE_FIELD_SIZE = 3;
 
@@ -18,15 +18,6 @@ type Wave = {
   step: number;
   lastStepTime: number;
   hitPlayer: boolean;
-};
-
-type Player = {
-  gridX: number;
-  gridY: number;
-  visualX: number;
-  visualY: number;
-  health: number;
-  isMoving: boolean;
 };
 
 export default function RhythmGame() {
@@ -39,8 +30,14 @@ export default function RhythmGame() {
   const [lives, setLives] = useState(5);
   const [score, setScore] = useState(0);
   const [hitIntensity, setHitIntensity] = useState(0);
+  const { durationMs: playerStepDurationMs, setDurationMs: setPlayerStepDurationMs } = useMovementDuration('raito');
+  const gameStateRef = useRef({ gameOver, isPaused, hitIntensity, movementDurationMs: playerStepDurationMs });
 
-  const playerRef = useRef<Player>({
+  useLayoutEffect(() => {
+    gameStateRef.current = { gameOver, isPaused, hitIntensity, movementDurationMs: playerStepDurationMs };
+  }, [gameOver, isPaused, hitIntensity, playerStepDurationMs]);
+
+  const playerRef = useRef<PlayerState>({
     gridX: MAP_RADIUS,
     gridY: MAP_RADIUS + 2,
     visualX: MAP_RADIUS * TILE_SIZE,
@@ -52,14 +49,9 @@ export default function RhythmGame() {
   const wavesRef = useRef<Wave[]>([]);
   const lastSpawnTimeRef = useRef<number>(0);
   const keysRef = useRef<{ [key: string]: boolean }>({});
+  const movementInputBufferRef = useRef<GridInputBuffer | null>(null);
+  const movementRef = useRef<PlayerMovement | null>(null);
   const scoreRef = useRef<number>(0);
-
-  const getOctagonalDist = (col: number, row: number) => {
-    const dx = Math.abs(col - MAP_RADIUS);
-    const dy = Math.abs(row - MAP_RADIUS);
-    const rawDist = Math.max(dx, dy, (dx + dy) * 0.707);
-    return Math.round(rawDist);
-  };
 
   const resetGame = () => {
     playerRef.current = {
@@ -67,6 +59,9 @@ export default function RhythmGame() {
       visualX: MAP_RADIUS * TILE_SIZE, visualY: (MAP_RADIUS + 2) * TILE_SIZE,
       health: 5, isMoving: false,
     };
+    movementInputBufferRef.current = null;
+    movementRef.current = null;
+    keysRef.current = {};
     wavesRef.current = [];
     lastSpawnTimeRef.current = performance.now();
     scoreRef.current = 0;
@@ -84,58 +79,27 @@ export default function RhythmGame() {
 
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      if (e.key === "Escape" && !gameOver) setIsPaused(prev => !prev);
-      keysRef.current[key] = true;
-      keysRef.current[e.key] = true; 
-    };
-    
-    const handleKeyUp = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = false;
-      keysRef.current[e.key] = false;
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-
-    let animationFrameId: number;
-
-    const gameLoop = (currentTime: number) => {
-      if (!gameOver && !isPaused) update(currentTime);
-      draw(ctx);
-      animationFrameId = requestAnimationFrame(gameLoop);
-    };
-
     const update = (currentTime: number) => {
       const player = playerRef.current;
       const keys = keysRef.current;
+      const currentHitIntensity = gameStateRef.current.hitIntensity;
 
-      if (hitIntensity > 0) {
+      if (currentHitIntensity > 0) {
         setHitIntensity(prev => Math.max(0, prev - 0.05));
       }
 
-      player.visualX += (player.gridX * TILE_SIZE - player.visualX) * 0.25;
-      player.visualY += (player.gridY * TILE_SIZE - player.visualY) * 0.25;
-
-      const dist = Math.abs(player.gridX * TILE_SIZE - player.visualX) + Math.abs(player.gridY * TILE_SIZE - player.visualY);
-      player.isMoving = dist > 0.5;
+      advanceGridMovement(player, movementRef, currentTime);
 
       if (!player.isMoving) {
-        let nX = player.gridX, nY = player.gridY;
-        if (keys['arrowup'] || keys['w']) nY--; 
-        else if (keys['arrowdown'] || keys['s']) nY++;
-        if (keys['arrowleft'] || keys['a']) nX--; 
-        else if (keys['arrowright'] || keys['d']) nX++;
+        const { x: directionX, y: directionY } = getNextGridDirection(keys, movementInputBufferRef, currentTime);
+
+        const nX = player.gridX + directionX;
+        const nY = player.gridY + directionY;
 
         const isCenter = nX === MAP_RADIUS && nY === MAP_RADIUS;
 
-        if ((nX !== player.gridX || nY !== player.gridY) && nX >= 0 && nX < MAP_SIZE && nY >= 0 && nY < MAP_SIZE && !isCenter) {
-          player.gridX = nX; player.gridY = nY;
-          player.isMoving = true;
+        if ((directionX !== 0 || directionY !== 0) && nX >= 0 && nX < MAP_SIZE && nY >= 0 && nY < MAP_SIZE && !isCenter) {
+          beginGridMovement(player, movementRef, nX, nY, currentTime, gameStateRef.current.movementDurationMs);
         }
       }
 
@@ -149,7 +113,7 @@ export default function RhythmGame() {
       if (isInEdgeField) {
         player.health -= 0.02; 
         setLives(Math.ceil(player.health));
-        if (hitIntensity < 0.3) setHitIntensity(0.4);
+        if (currentHitIntensity < 0.3) setHitIntensity(0.4);
         if (player.health <= 0) setGameOver(true);
       }
 
@@ -182,8 +146,9 @@ export default function RhythmGame() {
       ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       ctx.save();
       const player = playerRef.current;
+      const currentHitIntensity = gameStateRef.current.hitIntensity;
       
-      const shake = hitIntensity * 8;
+      const shake = currentHitIntensity * 8;
       const offsetX = (Math.random() - 0.5) * shake;
       const offsetY = (Math.random() - 0.5) * shake;
 
@@ -237,25 +202,39 @@ export default function RhythmGame() {
         ctx.drawImage(buzzImgRef.current, centerX - 8, centerY - 16, 48, 48);
       }
       
-      ctx.fillStyle = hitIntensity > 0.1 ? "#ff4d4d" : "#00ffcc"; 
-      ctx.shadowBlur = hitIntensity > 0.1 ? 25 : 15; 
-      ctx.shadowColor = hitIntensity > 0.1 ? "#ff4d4d" : "#00ffcc";
+      ctx.fillStyle = currentHitIntensity > 0.1 ? "#ff4d4d" : "#00ffcc";
+      ctx.shadowBlur = currentHitIntensity > 0.1 ? 25 : 15;
+      ctx.shadowColor = currentHitIntensity > 0.1 ? "#ff4d4d" : "#00ffcc";
       ctx.fillRect(player.visualX, player.visualY, TILE_SIZE, TILE_SIZE);
       ctx.restore();
 
-      if (hitIntensity > 0) {
-        ctx.fillStyle = `rgba(255, 0, 0, ${hitIntensity * 0.3})`;
+      if (currentHitIntensity > 0) {
+        ctx.fillStyle = `rgba(255, 0, 0, ${currentHitIntensity * 0.3})`;
         ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       }
     };
 
-    animationFrameId = requestAnimationFrame(gameLoop);
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [gameOver, isPaused, hitIntensity]);
+    return startCanvasRuntime(canvas, keysRef, {
+      onFrame: (context, currentTime) => {
+        const { gameOver: currentGameOver, isPaused: currentIsPaused } = gameStateRef.current;
+        if (!currentGameOver && !currentIsPaused) update(currentTime);
+        else if (movementRef.current) movementRef.current.lastTime = currentTime;
+        draw(context);
+      },
+      onKeyDown: event => {
+        if (!gameStateRef.current.isPaused && !gameStateRef.current.gameOver) {
+          captureGridInput(keysRef.current, movementInputBufferRef, performance.now());
+        }
+        if (event.key === 'Escape' && !gameStateRef.current.gameOver) {
+          setIsPaused(prev => !prev);
+        }
+      },
+      onBlur: () => {
+        movementInputBufferRef.current = null;
+      },
+      preventArrowScroll: true,
+    });
+  }, []);
 
   return (
     <div className="relative flex items-center justify-center w-full h-screen bg-[#050505] font-mono overflow-hidden">
@@ -268,68 +247,28 @@ export default function RhythmGame() {
       </button>
 
       {isPaused && !gameOver && (
-        <div className="absolute inset-0 z-60 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md">
-          <div className="flex flex-col items-center animate-in fade-in zoom-in duration-300">
-            <h2 className="text-5xl font-black text-white italic uppercase tracking-tighter mb-2">Game Paused</h2>
-            <div className="w-24 h-1 bg-cyan-500 mb-10 shadow-[0_0_15px_#06b6d4]"></div>
-            
-            <div className="flex gap-6">
-              <button onClick={() => setIsPaused(false)} className="group flex flex-col items-center gap-2">
-                <div className="w-16 h-16 flex items-center justify-center bg-white text-black rounded-full hover:bg-cyan-500 hover:text-white transition-all active:scale-90">
-                  <MdPlayArrow className="text-4xl" />
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">Resume</span>
-              </button>
-
-              <button onClick={resetGame} className="group flex flex-col items-center gap-2">
-                <div className="w-16 h-16 flex items-center justify-center bg-white/5 border border-white/10 text-white rounded-full hover:bg-white/20 transition-all active:scale-90">
-                  <MdRefresh className="text-3xl" />
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">Restart</span>
-              </button>
-
-              <button onClick={() => router.push('/')} className="group flex flex-col items-center gap-2">
-                <div className="w-16 h-16 flex items-center justify-center bg-white/5 border border-white/10 text-white rounded-full hover:bg-cyan-900/40 transition-all active:scale-90">
-                  <MdHome className="text-3xl" />
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">Exit</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <PauseOverlay
+          theme="cyan"
+          durationMs={playerStepDurationMs}
+          onResume={() => setIsPaused(false)}
+          onRestart={resetGame}
+          onExit={() => router.push('/')}
+          onDurationChange={setPlayerStepDurationMs}
+        />
       )}
 
       {gameOver && (
-              <div className="absolute inset-0 z-70 flex flex-col items-center justify-center bg-black/95 backdrop-blur-2xl">
-                <h1 className="text-6xl font-black text-rose-600 mb-2 italic uppercase">You lost</h1>
-                <p className="text-white/50 mb-10 font-bold uppercase tracking-widest">Final Score: {score}</p>
-                <div className="flex gap-4">
-                  <button onClick={resetGame} className="px-10 py-4 bg-emerald-500 text-black font-black rounded-full uppercase text-xs hover:scale-105 transition-transform flex items-center gap-2">
-                    <MdRefresh className="text-xl" /> Retry
-                  </button>
-                  <button onClick={() => router.push('/')} className="px-10 py-4 bg-white/5 border border-white/10 text-white font-black rounded-full uppercase text-xs hover:bg-white/10 transition-all flex items-center gap-2">
-                    <MdHome className="text-xl" /> Exit
-                  </button>
-                </div>
-              </div>
-            )}
+        <GameOverOverlay
+          score={score}
+          theme="cyan"
+          durationMs={playerStepDurationMs}
+          onRestart={resetGame}
+          onExit={() => router.push('/')}
+          onDurationChange={setPlayerStepDurationMs}
+        />
+      )}
 
-      <div className="absolute top-8 left-8 z-20 flex flex-col gap-4 pointer-events-none">
-        <div className="flex items-center gap-3">
-            <div className="w-1 h-12 bg-rose-500 shadow-[0_0_10px_#f43f5e]"></div>
-            <div>
-                <p className="text-[10px] text-rose-500 font-bold uppercase tracking-widest mb-1 leading-none">Lifes</p>
-                <span className="text-white font-black text-3xl tracking-tighter">{lives}</span>
-            </div>
-        </div>
-        <div className="flex items-center gap-3">
-            <div className="w-1 h-12 bg-cyan-500 shadow-[0_0_10px_#06b6d4]"></div>
-            <div>
-                <p className="text-[10px] text-cyan-500 font-bold uppercase tracking-widest mb-1 leading-none">Score points</p>
-                <span className="text-white font-black text-3xl tracking-tighter tabular-nums">{score}</span>
-            </div>
-        </div>
-      </div>
+      <GameHud variant="raito" lives={lives} score={score} />
 
       <div className="relative p-1 bg-white/5 rounded-3xl">
         <canvas 

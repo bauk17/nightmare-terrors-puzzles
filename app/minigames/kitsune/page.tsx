@@ -1,15 +1,15 @@
 "use client";
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useLayoutEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { MdClose, MdPlayArrow, MdRefresh, MdHome } from "react-icons/md";
+import { MdClose } from "react-icons/md";
+import { startCanvasRuntime } from '../_shared/canvasRuntime';
+import { GameHud, GameOverOverlay, PauseOverlay } from '../_shared/MinigameOverlays';
+import { useMovementDuration } from '../_shared/useMovementDuration';
+import { advanceGridMovement, beginGridMovement, CANVAS_HEIGHT, CANVAS_WIDTH, captureGridInput, getNextGridDirection, getOctagonalDist, MAP_RADIUS, MAP_SIZE, TILE_SIZE } from '../_shared/gameUtils';
+import type { GridInputBuffer, PlayerMovement, PlayerState } from '../_shared/gameUtils';
 
 // --- CONSTANTES ---
-const TILE_SIZE = 32;
-const MAP_SIZE = 31;
-const MAP_RADIUS = Math.floor(MAP_SIZE / 2);
-const CANVAS_WIDTH = 640;
-const CANVAS_HEIGHT = 480;
 const STEP_DELAY = 205; 
 const SPAWN_INTERVAL_MS = 1500; 
 const DEAD_ZONE_RADIUS = 9; 
@@ -18,15 +18,6 @@ type Wave = {
   step: number;
   lastStepTime: number;
   hitPlayer: boolean;
-};
-
-type Player = {
-  gridX: number;
-  gridY: number;
-  visualX: number;
-  visualY: number;
-  health: number;
-  isMoving: boolean;
 };
 
 export default function KitsuneRitual() {
@@ -40,8 +31,14 @@ export default function KitsuneRitual() {
   const [score, setScore] = useState(0);
   const [statusText, setStatusText] = useState("");
   const [hitEffect, setHitEffect] = useState(0);
+  const { durationMs: playerStepDurationMs, setDurationMs: setPlayerStepDurationMs } = useMovementDuration('kitsune');
+  const gameStateRef = useRef({ gameOver, isPaused, statusText, hitEffect, movementDurationMs: playerStepDurationMs });
 
-  const playerRef = useRef<Player>({
+  useLayoutEffect(() => {
+    gameStateRef.current = { gameOver, isPaused, statusText, hitEffect, movementDurationMs: playerStepDurationMs };
+  }, [gameOver, isPaused, statusText, hitEffect, playerStepDurationMs]);
+
+  const playerRef = useRef<PlayerState>({
     gridX: MAP_RADIUS,
     gridY: MAP_RADIUS + 2,
     visualX: MAP_RADIUS * TILE_SIZE,
@@ -54,17 +51,12 @@ export default function KitsuneRitual() {
   const gameStartTimeRef = useRef<number | null>(null);
   const lastSpawnTimeRef = useRef<number>(0);
   const keysRef = useRef<{ [key: string]: boolean }>({});
+  const movementInputBufferRef = useRef<GridInputBuffer | null>(null);
+  const movementRef = useRef<PlayerMovement | null>(null);
   const scoreRef = useRef<number>(0);
 
   // Cache de Estrelas (Aumentado para 400 e com cores variadas)
   const starsRef = useRef<Array<{ x: number; y: number; size: number; alpha: number; phase: number; color: string }>>([]);
-
-  const getOctagonalDist = (col: number, row: number) => {
-    const dx = Math.abs(col - MAP_RADIUS);
-    const dy = Math.abs(row - MAP_RADIUS);
-    const rawDist = Math.max(dx, dy, (dx + dy) * 0.707);
-    return Math.round(rawDist);
-  };
 
   const resetGame = () => {
     playerRef.current = {
@@ -72,6 +64,9 @@ export default function KitsuneRitual() {
       visualX: MAP_RADIUS * TILE_SIZE, visualY: (MAP_RADIUS + 2) * TILE_SIZE,
       health: 5, isMoving: false,
     };
+    movementInputBufferRef.current = null;
+    movementRef.current = null;
+    keysRef.current = {};
     wavesRef.current = [];
     gameStartTimeRef.current = null;
     lastSpawnTimeRef.current = 0;
@@ -107,70 +102,40 @@ export default function KitsuneRitual() {
 
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.imageSmoothingEnabled = false;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = true;
-      if (e.key === "Escape" && !gameOver) setIsPaused(prev => !prev);
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = false;
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-
-    let animationFrameId: number;
-
-    const gameLoop = (currentTime: number) => {
-      if (gameStartTimeRef.current === null) gameStartTimeRef.current = currentTime;
-      if (!gameOver && !isPaused) update(currentTime);
-      draw(ctx);
-      animationFrameId = requestAnimationFrame(gameLoop);
-    };
-
     const update = (currentTime: number) => {
       const player = playerRef.current;
       const keys = keysRef.current;
+      const { statusText: currentStatusText, hitEffect: currentHitEffect } = gameStateRef.current;
       const elapsed = currentTime - (gameStartTimeRef.current || currentTime);
 
-      if (hitEffect > 0) setHitEffect(prev => Math.max(0, prev - 0.05));
+      if (currentHitEffect > 0) setHitEffect(prev => Math.max(0, prev - 0.05));
 
       let canMove = false;
       let startWaves = false;
 
       if (elapsed < 1000) {
-        if (statusText !== "STUNNED...") setStatusText("STUNNED...");
+        if (currentStatusText !== "STUNNED...") setStatusText("STUNNED...");
       } else if (elapsed < 2000) {
         canMove = true;
         const rem = ((2000 - elapsed) / 1000).toFixed(1);
-        if (statusText !== `WAVE IN: ${rem}s`) setStatusText(`WAVE IN: ${rem}s`);
+        if (currentStatusText !== `WAVE IN: ${rem}s`) setStatusText(`WAVE IN: ${rem}s`);
       } else {
         canMove = true;
         startWaves = true;
-        if (statusText !== "") setStatusText("");
+        if (currentStatusText !== "") setStatusText("");
       }
 
-      player.visualX += (player.gridX * TILE_SIZE - player.visualX) * 0.25;
-      player.visualY += (player.gridY * TILE_SIZE - player.visualY) * 0.25;
-
-      const dist = Math.abs(player.gridX * TILE_SIZE - player.visualX) + Math.abs(player.gridY * TILE_SIZE - player.visualY);
-      player.isMoving = dist > 0.5;
+      advanceGridMovement(player, movementRef, currentTime);
 
       if (!player.isMoving && canMove) {
-        let nX = player.gridX, nY = player.gridY;
-        if (keys['arrowup'] || keys['w']) nY--; 
-        else if (keys['arrowdown'] || keys['s']) nY++;
-        if (keys['arrowleft'] || keys['a']) nX--; 
-        else if (keys['arrowright'] || keys['d']) nX++;
+        const { x: directionX, y: directionY } = getNextGridDirection(keys, movementInputBufferRef, currentTime);
+        const nX = player.gridX + directionX;
+        const nY = player.gridY + directionY;
 
         const isInsideMap = nX >= 0 && nX < MAP_SIZE && nY >= 0 && nY < MAP_SIZE;
         const distFromCenter = Math.max(Math.abs(nX - MAP_RADIUS), Math.abs(nY - MAP_RADIUS));
 
-        if (isInsideMap && (nX !== player.gridX || nY !== player.gridY)) {
+        if (isInsideMap && (directionX !== 0 || directionY !== 0) && (nX !== player.gridX || nY !== player.gridY)) {
           if (distFromCenter >= DEAD_ZONE_RADIUS) {
             player.health = 0;
             setLives(0);
@@ -180,9 +145,7 @@ export default function KitsuneRitual() {
           }
           if (nX === MAP_RADIUS && nY === MAP_RADIUS) return;
 
-          player.gridX = nX; 
-          player.gridY = nY;
-          player.isMoving = true;
+          beginGridMovement(player, movementRef, nX, nY, currentTime, gameStateRef.current.movementDurationMs);
         }
       }
 
@@ -218,10 +181,11 @@ export default function KitsuneRitual() {
     };
 
     const draw = (ctx: CanvasRenderingContext2D) => {
+      const { statusText: currentStatusText, hitEffect: currentHitEffect, isPaused: currentIsPaused } = gameStateRef.current;
       ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       ctx.save();
       const player = playerRef.current;
-      
+
       // Câmera centrada no player
       ctx.translate(CANVAS_WIDTH / 2 - (player.visualX + 16), CANVAS_HEIGHT / 2 - (player.visualY + 16));
 
@@ -330,30 +294,47 @@ export default function KitsuneRitual() {
       ctx.restore();
 
       // Vinheta de Dano
-      if (hitEffect > 0) {
+      if (currentHitEffect > 0) {
         const grad = ctx.createRadialGradient(
           CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH * 0.2,
           CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, CANVAS_WIDTH * 0.6
         );
         grad.addColorStop(0, 'rgba(255, 0, 0, 0)');
-        grad.addColorStop(1, `rgba(180, 0, 0, ${hitEffect})`);
+        grad.addColorStop(1, `rgba(180, 0, 0, ${currentHitEffect})`);
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
       }
 
-      if (statusText && !isPaused) {
+      if (currentStatusText && !currentIsPaused) {
         ctx.fillStyle = "#ff1e4b"; ctx.font = "bold 24px monospace"; ctx.textAlign = "center";
-        ctx.fillText(statusText, CANVAS_WIDTH / 2, 80);
+        ctx.fillText(currentStatusText, CANVAS_WIDTH / 2, 80);
       }
     };
 
-    animationFrameId = requestAnimationFrame(gameLoop);
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [gameOver, isPaused, statusText, hitEffect]);
+    return startCanvasRuntime(canvas, keysRef, {
+      configureContext: context => {
+        context.imageSmoothingEnabled = false;
+      },
+      onFrame: (context, currentTime) => {
+        if (gameStartTimeRef.current === null) gameStartTimeRef.current = currentTime;
+        const { gameOver: currentGameOver, isPaused: currentIsPaused } = gameStateRef.current;
+        if (!currentGameOver && !currentIsPaused) update(currentTime);
+        else if (movementRef.current) movementRef.current.lastTime = currentTime;
+        draw(context);
+      },
+      onKeyDown: event => {
+        if (!gameStateRef.current.isPaused && !gameStateRef.current.gameOver) {
+          captureGridInput(keysRef.current, movementInputBufferRef, performance.now());
+        }
+        if (event.key === 'Escape' && !gameStateRef.current.gameOver) {
+          setIsPaused(prev => !prev);
+        }
+      },
+      onBlur: () => {
+        movementInputBufferRef.current = null;
+      },
+    });
+  }, []);
 
   return (
     <div className="relative flex items-center justify-center w-full h-screen bg-[#020000] font-mono overflow-hidden">
@@ -362,53 +343,28 @@ export default function KitsuneRitual() {
       </button>
 
       {isPaused && !gameOver && (
-        <div className="absolute inset-0 z-60 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md">
-          <div className="flex flex-col items-center animate-in fade-in zoom-in duration-300">
-            <h2 className="text-5xl font-black text-white italic uppercase tracking-tighter mb-2">Game Paused</h2>
-            <div className="w-24 h-1 bg-rose-600 mb-10 shadow-[0_0_15px_#e11d48]"></div>
-            <div className="flex gap-6">
-              <button onClick={() => setIsPaused(false)} className="group flex flex-col items-center gap-2">
-                <div className="w-16 h-16 flex items-center justify-center bg-white text-black rounded-full group-hover:bg-rose-600 group-hover:text-white transition-all group-active:scale-90"><MdPlayArrow className="text-4xl" /></div>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">Resume</span>
-              </button>
-              <button onClick={resetGame} className="group flex flex-col items-center gap-2">
-                <div className="w-16 h-16 flex items-center justify-center bg-white/5 border border-white/10 text-white rounded-full group-hover:bg-white/20 transition-all group-active:scale-90"><MdRefresh className="text-3xl" /></div>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">Restart</span>
-              </button>
-              <button onClick={() => router.push('/')} className="group flex flex-col items-center gap-2">
-                <div className="w-16 h-16 flex items-center justify-center bg-white/5 border border-white/10 text-white rounded-full group-hover:bg-rose-900/40 transition-all group-active:scale-90"><MdHome className="text-3xl" /></div>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">Exit</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <PauseOverlay
+          theme="rose"
+          durationMs={playerStepDurationMs}
+          onResume={() => setIsPaused(false)}
+          onRestart={resetGame}
+          onExit={() => router.push('/')}
+          onDurationChange={setPlayerStepDurationMs}
+        />
       )}
       
       {gameOver && (
-        <div className="absolute inset-0 z-70 flex flex-col items-center justify-center bg-black/95 backdrop-blur-2xl">
-          <h1 className="text-6xl font-black text-rose-600 mb-2 italic uppercase">You lost</h1>
-          <p className="text-white/50 mb-10 font-bold uppercase tracking-widest">Final Score: {score}</p>
-          <div className="flex gap-4">
-            <button onClick={resetGame} className="px-10 py-4 bg-emerald-500 text-black font-black rounded-full uppercase text-xs hover:scale-105 transition-transform flex items-center gap-2">
-              <MdRefresh className="text-xl" /> Retry
-            </button>
-            <button onClick={() => router.push('/')} className="px-10 py-4 bg-white/5 border border-white/10 text-white font-black rounded-full uppercase text-xs hover:bg-white/10 transition-all flex items-center gap-2">
-              <MdHome className="text-xl" /> Exit
-            </button>
-          </div>
-        </div>
+        <GameOverOverlay
+          score={score}
+          theme="rose"
+          durationMs={playerStepDurationMs}
+          onRestart={resetGame}
+          onExit={() => router.push('/')}
+          onDurationChange={setPlayerStepDurationMs}
+        />
       )}
 
-      <div className="absolute top-8 left-8 z-20 flex flex-col gap-4 pointer-events-none text-white">
-        <div className="flex items-center gap-3">
-          <div className="w-1.5 h-10 bg-rose-600 shadow-[0_0_10px_#f43f5e]"></div>
-          <div><p className="text-[10px] text-rose-500 font-bold uppercase tracking-widest leading-none mb-1">Lifes</p><span className="font-black text-3xl">{lives}</span></div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="w-1.5 h-10 bg-white"></div>
-          <div><p className="text-[10px] text-neutral-500 font-bold uppercase tracking-widest leading-none mb-1">Score</p><span className="font-black text-3xl tabular-nums">{score}</span></div>
-        </div>
-      </div>
+      <GameHud variant="kitsune" lives={lives} score={score} />
 
       <div className="relative p-1 bg-white/5 rounded-3xl">
         <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="rounded-2xl bg-[#010005] shadow-2xl" />
